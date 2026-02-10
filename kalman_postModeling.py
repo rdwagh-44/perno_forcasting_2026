@@ -5,9 +5,17 @@ from sklearn.preprocessing import StandardScaler
 
 st.set_page_config(page_title="Kalman Beta Forecasting", layout="wide")
 
-tab1, tab2 = st.tabs(["Kalman Regression", "Post-Modeling Analysis"])
+# tab1, tab2 = st.tabs(["Kalman Regression", "Post-Modeling Analysis"])
 
-with tab1:
+# with tab1:
+
+menu = st.sidebar.selectbox(
+    "Select Module",
+    ["Kalman Regression", "Post-Modeling Analysis"]
+)
+
+if menu == "Kalman Regression":
+    st.header("Kalman Regression")
 
     # =====================================================
     # ----------- KALMAN REGRESSION CLASS -----------------
@@ -894,8 +902,8 @@ with tab1:
 ################################################################# Post MOdelling ###############################################################################
 
 
-
-with tab2:
+elif menu == "Post-Modeling Analysis":
+    st.header("Post-Modeling Analysis")
 
     st.title("📊 Post-Modeling Analysis")
 
@@ -1004,7 +1012,8 @@ with tab2:
 
         # st.dataframe(elasticity_df)
 
-        st.dataframe(growth_df)
+        edited_growth_df = st.data_editor(growth_df)
+
     # dataset_df["date"] = pd.to_datetime(dataset_df["date"])
 
     beta_rows = []
@@ -1071,7 +1080,7 @@ with tab2:
 
     future_rows = []
 
-    for _, row in growth_df.iterrows():
+    for _, row in edited_growth_df.iterrows():
         seg = row["Segment"]
         var = row["Variable"]
         growth = row[future_year] / 100
@@ -1153,7 +1162,7 @@ with tab2:
     # st.dataframe(final_df[["Segment", "Volume", "PredictedVolume", "VolumeGrowth_%"]])
 
     future_year_cols = [
-        c for c in growth_df.columns
+        c for c in edited_growth_df.columns
         if "Growth Rate" in c
     ]
 
@@ -1214,9 +1223,9 @@ with tab2:
 
             for var, prev_val in last_x_values[seg].items():
 
-                g = growth_df.loc[
-                    (growth_df["Segment"] == seg) &
-                    (growth_df["Variable"] == var),
+                g = edited_growth_df.loc[
+                    (edited_growth_df["Segment"] == seg) &
+                    (edited_growth_df["Variable"] == var),
                     growth_col
                 ]
 
