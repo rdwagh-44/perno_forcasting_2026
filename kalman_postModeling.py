@@ -302,30 +302,44 @@ if menu == "Kalman Regression":
 
     dataset_file = st.sidebar.file_uploader(
         "Dataset (CSV / Excel)",
-        type=["csv", "xlsx", "xls"]
+        type=["csv", "xlsx", "xls"],
+        key="dataset"
     )
 
     model_file = st.sidebar.file_uploader(
         "Model Summary (CSV / Excel)",
-        type=["csv", "xlsx", "xls"]
+        type=["csv", "xlsx", "xls"],
+        key="model"
     )
+
+
+    def load_file(uploaded_file, file_label):
+        if uploaded_file.name.endswith(".csv"):
+            return pd.read_csv(uploaded_file)
+
+        else:
+            # Read Excel file object
+            excel_file = pd.ExcelFile(uploaded_file)
+
+            # Sheet selector
+            sheet_name = st.sidebar.selectbox(
+                f"Select sheet for {file_label}",
+                excel_file.sheet_names,
+                key=f"{file_label}_sheet"
+            )
+
+            return pd.read_excel(excel_file, sheet_name=sheet_name)
+
 
     if not dataset_file or not model_file:
         st.info("Upload both dataset and model summary files to proceed.")
         st.stop()
 
-
-    def load_file(uploaded_file):
-        if uploaded_file.name.endswith(".csv"):
-            return pd.read_csv(uploaded_file)
-        else:
-            return pd.read_excel(uploaded_file)
+    dataset_df = load_file(dataset_file, "Dataset")
+    model_df = load_file(model_file, "Model")
 
 
-    dataset_df = load_file(dataset_file)
-    model_df = load_file(model_file)
-
-    st.dataframe(dataset_df)
+    # st.dataframe(dataset_df)
 
 
     # dataset_df["date"] = pd.to_datetime(dataset_df["date"], format="%m/%d/%Y")
@@ -824,6 +838,28 @@ if menu == "Kalman Regression":
         legend=dict(x=0.01, y=0.99)
     )
 
+    year_ticks = pd.date_range(
+        start=dates_all.min(),
+        end=dates_all.max(),
+        freq="YS"
+    )
+
+    tick_text = []
+    for d in year_ticks:
+        if d.year == 2025:
+            tick_text.append("2024 New")
+        elif d.year == 2026:
+            tick_text.append("2025")
+        else:
+            tick_text.append(str(d.year))
+
+    fig.update_xaxes(
+        tickmode="array",
+        tickvals=year_ticks,
+        ticktext=tick_text
+    )
+
+
     st.subheader("📈 Actual vs Predicted")
     with st.expander("📈 Actual vs Predicted (Observed + Forecast)"):
         st.plotly_chart(fig, use_container_width=True)
@@ -851,6 +887,7 @@ if menu == "Kalman Regression":
         base_std = x_base.std()
         base_mean_x = x_base.mean()
         base_mean_y = y_base.mean()
+        base_sum_x = x_base.sum()
 
         base_unscaled_beta = base_scaled_beta / base_std
 
@@ -878,11 +915,15 @@ if menu == "Kalman Regression":
 
         stats_rows.append({
             "Variable": var,
-            "Base Scaled Beta": base_scaled_beta,
-            "Base Unscaled Beta": base_unscaled_beta,
+            # "Base Scaled Beta": base_scaled_beta,
+            # # "base sum": base_sum_x,
+            # "Base Std" : base_std,
+            # 'Base mean': base_mean_x,
+            # 'Base y mean': base_mean_y,
+            # "Base Unscaled Beta": base_unscaled_beta,
             "Base Elasticity": base_elasticity,
-            "Kalman Scaled Beta": kalman_scaled_beta,
-            "Kalman Unscaled Beta": kalman_unscaled_beta,
+            # "Kalman Scaled Beta": kalman_scaled_beta,
+            # "Kalman Unscaled Beta": kalman_unscaled_beta,
             "Kalman Elasticity": kalman_elasticity
         })
 
@@ -929,10 +970,45 @@ elif menu == "Post-Modeling Analysis":
         st.info("Upload all required files to proceed.")
         st.stop()
 
+    # dataset_file = st.sidebar.file_uploader(
+    #     "Upload Modeling Dataset", type=["csv", "xlsx"]
+    # )
+
+    def data_load_file(file, sheet_name=None):
+        if file.name.endswith(".csv"):
+            return pd.read_csv(file)
+        else:
+            return pd.read_excel(file, sheet_name=sheet_name)
+
+    dataset_df = None
+
+    if dataset_file is not None:
+
+        # If Excel → show sheet selector
+        if dataset_file.name.endswith(".xlsx"):
+
+            excel_file = pd.ExcelFile(dataset_file)
+            sheet_names = excel_file.sheet_names
+
+            selected_sheet = st.sidebar.selectbox(
+                "Select Excel Sheet",
+                sheet_names
+            )
+
+            dataset_df = pd.read_excel(dataset_file, sheet_name=selected_sheet)
+
+        else:
+            dataset_df = pd.read_csv(dataset_file)
+
+    # Show dataframe
+    # if dataset_df is not None:
+        # st.dataframe(dataset_df)
+
+
     # -----------------------------------------------------
     # LOAD FILES
     # -----------------------------------------------------
-    dataset_df = load_file(dataset_file)
+    # dataset_df = load_file(dataset_file)
     elasticity_df = load_file(elasticity_file)
     growth_df = load_file(growth_file)
 
@@ -940,22 +1016,66 @@ elif menu == "Post-Modeling Analysis":
     # DISPLAY DATA
     # -----------------------------------------------------
     with st.expander("Modeling Dataset"):
-        # Ensure datetime
-        dataset_df["date"] = pd.to_datetime(dataset_df["date"], errors="coerce")
-        dataset_df = dataset_df[
-            dataset_df["date"] >= pd.Timestamp("2025-01-01")
-        ].copy()
-        # Correct year (shift back by 1 year)
-        dataset_df["date"] = dataset_df["date"] - pd.DateOffset(years=1)
-        dataset_df["Year"] = dataset_df["date"].dt.year
-        dataset_df["Month"] = dataset_df["date"].dt.month
-        dataset_df["Fiscal Year"] = (
-            "FY" +
-            (dataset_df["date"].dt.year + (dataset_df["date"].dt.month >= 7))
-            .astype(str).str[-2:]
-        )
-        # dataset_df["Fiscal Year"].unique()
+        # # Ensure datetime
+        # dataset_df["date"] = pd.to_datetime(dataset_df["date"], errors="coerce")
+        # dataset_df = dataset_df[
+        #     dataset_df["date"] >= pd.Timestamp("2025-01-01")
+        # ].copy()
+        # # Correct year (shift back by 1 year)
+        # dataset_df["date"] = dataset_df["date"] - pd.DateOffset(years=1)
+        # dataset_df["Year"] = dataset_df["date"].dt.year
+        # dataset_df["Month"] = dataset_df["date"].dt.month
+        # dataset_df["Fiscal Year"] = (
+        #     "FY" +
+        #     (dataset_df["date"].dt.year + (dataset_df["date"].dt.month >= 7))
+        #     .astype(str).str[-2:]
+        # )
+        # # dataset_df["Fiscal Year"].unique()
+        # st.dataframe(dataset_df)
+
+        # # Ensure datetime
+        # dataset_df["date"] = pd.to_datetime(dataset_df["date"], errors="coerce")
+
+        # # --------------------------------------------------
+        # # 1️⃣ Remove original 2024 data
+        # # --------------------------------------------------
+        # dataset_df = dataset_df[
+        #     dataset_df["date"].dt.year != 2024
+        # ].copy()
+
+        # # --------------------------------------------------
+        # # 2️⃣ Rename years (hard replace)
+        # # 2025 → 2024
+        # # 2026 → 2025
+        # # --------------------------------------------------
+        # mask_2025 = dataset_df["date"].dt.year == 2025
+        # mask_2026 = dataset_df["date"].dt.year == 2026
+
+        # dataset_df.loc[mask_2025, "date"] = (
+        #     dataset_df.loc[mask_2025, "date"] - pd.DateOffset(years=1)
+        # )
+
+        # dataset_df.loc[mask_2026, "date"] = (
+        #     dataset_df.loc[mask_2026, "date"] - pd.DateOffset(years=1)
+        # )
+
+        # # --------------------------------------------------
+        # # 3️⃣ Recreate date-derived columns
+        # # --------------------------------------------------
+        # dataset_df["Year"] = dataset_df["date"].dt.year
+        # dataset_df["Month"] = dataset_df["date"].dt.month
+
+        # dataset_df["Fiscal Year"] = (
+        #     "FY" +
+        #     (dataset_df["date"].dt.year + (dataset_df["date"].dt.month >= 7))
+        #     .astype(str).str[-2:]
+        # )
+
+        # --------------------------------------------------
+        # Display
+        # --------------------------------------------------
         st.dataframe(dataset_df)
+
 
     dataset_df.rename(columns={"Region": "Segment"}, inplace=True)
 
@@ -1047,11 +1167,49 @@ elif menu == "Post-Modeling Analysis":
     beta_df = pd.DataFrame(beta_rows)
     # st.dataframe(beta_df)
 
-    dataset_df["FY_num"] = dataset_df["Fiscal Year"].str.extract(r"(\d+)").astype(int)
+    # Ensure datetim
+    dataset_df["date"] = pd.to_datetime(dataset_df["date"], errors="coerce")
 
-    recent_fy_num = dataset_df["FY_num"].max() -1
+    # --------------------------------------------------
+    # 1️⃣ Remove original 2024 data
+    # --------------------------------------------------
+    dataset_df_filter = dataset_df[
+        dataset_df["date"].dt.year != 2024
+    ].copy()
+
+    # --------------------------------------------------
+    # 2️⃣ Rename years (hard replace)
+    # 2025 → 2024
+    # 2026 → 2025
+    # --------------------------------------------------
+    mask_2025 = dataset_df_filter["date"].dt.year == 2025
+    mask_2026 = dataset_df_filter["date"].dt.year == 2026
+
+    dataset_df_filter.loc[mask_2025, "date"] = (
+        dataset_df_filter.loc[mask_2025, "date"] - pd.DateOffset(years=1)
+    )
+
+    dataset_df_filter.loc[mask_2026, "date"] = (
+        dataset_df_filter.loc[mask_2026, "date"] - pd.DateOffset(years=1)
+    )
+
+    # --------------------------------------------------
+    # 3️⃣ Recreate date-derived columns
+    # --------------------------------------------------
+    dataset_df_filter["Year"] = dataset_df_filter["date"].dt.year
+    dataset_df_filter["Month"] = dataset_df_filter["date"].dt.month
+
+    dataset_df_filter["Fiscal Year"] = (
+        "FY" +
+        (dataset_df_filter["date"].dt.year + (dataset_df_filter["date"].dt.month >= 7))
+        .astype(str).str[-2:]
+    )
+
+    dataset_df_filter["FY_num"] = dataset_df_filter["Fiscal Year"].str.extract(r"(\d+)").astype(int)
+
+    recent_fy_num = dataset_df_filter["FY_num"].max() -1
     recent_fy = f"FY{recent_fy_num}"
-    st.write(f"Most recent fiscal year in dataset: {recent_fy}")
+    # st.write(f"Most recent fiscal year in dataset: {recent_fy}")
 
     elasticity_vars = (
         elasticity_df["Variable"]
@@ -1068,13 +1226,13 @@ elif menu == "Post-Modeling Analysis":
     cols_to_avg = ["Segment", "Volume"] + available_vars
 
     fy_avg = (
-        dataset_df
-        .loc[dataset_df["Fiscal Year"] == recent_fy, cols_to_avg]
+        dataset_df_filter
+        .loc[dataset_df_filter["Fiscal Year"] == recent_fy, cols_to_avg]
         .groupby("Segment", as_index=False)
         .mean()
     )
 
-    st.dataframe(fy_avg)
+    # st.dataframe(fy_avg)
 
     future_year = "A26 Growth Rate (%)"
 
@@ -1103,13 +1261,13 @@ elif menu == "Post-Modeling Analysis":
         seg = row["Segment"]
         var = row["Variable"]
 
-        base_df = dataset_df[
-            (dataset_df["Segment"] == seg) &
-            (dataset_df["Fiscal Year"] == recent_fy)
+        base_df = dataset_df_filter[
+            (dataset_df_filter["Segment"] == seg) &
+            (dataset_df_filter["Fiscal Year"] == recent_fy)
         ]
 
-        mean_x = dataset_df[var].mean()
-        std_x = dataset_df[var].std()
+        mean_x = dataset_df_filter[var].mean()
+        std_x = dataset_df_filter[var].std()
 
         scaled_val = (row["FutureValue"] - mean_x) / std_x
 
@@ -1146,7 +1304,7 @@ elif menu == "Post-Modeling Analysis":
     prediction_df = pd.DataFrame(predictions)
 
     base_vol = (
-        dataset_df[dataset_df["Fiscal Year"] == recent_fy]
+        dataset_df_filter[dataset_df_filter["Fiscal Year"] == recent_fy]
         .groupby("Segment")["Volume"]
         .mean()
         .reset_index()
@@ -1187,12 +1345,13 @@ elif menu == "Post-Modeling Analysis":
     base_fy = "FY25"
 
     fy24_avg = (
-        dataset_df[dataset_df["Fiscal Year"] == base_fy]
+        dataset_df_filter[dataset_df_filter["Fiscal Year"] == base_fy]
         .groupby("Segment", as_index=False)
         .mean(numeric_only=True)
     )
+    # st.dataframe(fy24_avg)
 
-    target_years = ["A25", "A26", "A27", "A28","A29"]
+    target_years = ["A26", "A27", "A28","A29"]#
     base_vol_map = dict(
         zip(base_vol["Segment"], base_vol["Volume"])
     )
@@ -1235,6 +1394,7 @@ elif menu == "Post-Modeling Analysis":
 
                 growth = g.values[0] / 100
                 new_x[var] = prev_val * (1 + growth)
+                # st.write(new_x[var],prev_val,growth)
 
             # ---- STEP 2: scale using GLOBAL stats ----
             y_hat = beta_df.loc[
@@ -1257,8 +1417,10 @@ elif menu == "Post-Modeling Analysis":
                 x_scaled = (new_x[var] - mean_x) / std_x
                 x_contrib = b["ScaledBeta"] * x_scaled
                 y_hat += b["ScaledBeta"] * x_scaled
-
+                # st.write(var)
+                # st.write(x_scaled)
                 # st.write(b["ScaledBeta"])
+                # st.write(x_contrib)
 
             base_vol = fy_avg["Volume"]
 
@@ -1286,7 +1448,7 @@ elif menu == "Post-Modeling Analysis":
     # )
 
     base_vol_df = (
-        dataset_df[dataset_df["Fiscal Year"] == recent_fy]
+        dataset_df_filter[dataset_df_filter["Fiscal Year"] == recent_fy]
         .groupby("Segment")["Volume"]
         .mean()
         .reset_index()
