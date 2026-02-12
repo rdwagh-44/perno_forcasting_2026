@@ -22,6 +22,189 @@ if menu == "Kalman Regression":
     # =====================================================
 
 
+    # class TimeVaryingKalmanRegression:
+    #     """
+    #     Time-Varying Kalman Regression with:
+    #     - Per-variable process noise
+    #     - Mean reversion to base beta (EXCEPT intercept)
+    #     - Adaptive intercept (beta0)
+    #     - Covariance-aware sign constraints
+    #     - Per-variable max deviation from base beta
+    #     """
+
+    #     def __init__(
+    #         self,
+    #         q=1e-5,
+    #         r=50.0,
+    #         init_cov=10.0,
+    #         q_scale=None,
+    #         anchor_strength=0.05,
+    #         non_negative_idx=None,
+    #         non_positive_idx=None,
+    #         max_dev=None              # ⬅️ NEW
+    #     ):
+    #         self.q = q
+    #         self.r = r
+    #         self.init_cov = init_cov
+    #         self.q_scale = q_scale or {}
+    #         self.anchor_strength = anchor_strength
+
+    #         self.non_negative_idx = non_negative_idx or []
+    #         self.non_positive_idx = non_positive_idx or []
+
+    #         # max allowed deviation from base beta (standardized scale)
+    #         # {x_idx: delta}
+    #         self.max_dev = max_dev or {}
+
+    #     # --------------------------------------------------
+
+    #     def fit(self, X, y, base_beta=None, beta0_init=0.0):
+    #         T, p = X.shape
+    #         n_state = p + 1  # intercept + betas
+
+    #         # ----- Initial state -----
+    #         self.beta_ = np.zeros(n_state)
+    #         self.beta_[0] = beta0_init
+    #         if base_beta is not None:
+    #             self.beta_[1:] = base_beta
+
+    #         self.base_beta_ = self.beta_.copy()
+
+    #         # ----- Covariances -----
+    #         self.P_ = np.eye(n_state) * self.init_cov
+    #         self.Q_ = self._build_Q(n_state)
+    #         self.R_ = self.r
+    #         self.I_ = np.eye(n_state)
+
+    #         betas = np.zeros((T + 1, n_state))
+    #         y_pred = np.zeros(T)
+    #         betas[0] = self.beta_
+
+    #         for t in range(T):
+    #             y_pred[t] = self._kalman_step(X[t], y[t])
+    #             betas[t + 1] = self.beta_
+
+    #         self.betas_ = betas
+    #         self.y_pred_ = y_pred
+    #         return self
+
+    #     # --------------------------------------------------
+
+    #     def _build_Q(self, n_state):
+    #         Q = np.eye(n_state) * self.q
+
+    #         # Intercept: smoother but not frozen
+    #         Q[0, 0] = self.q * 0.2
+
+    #         for idx, scale in self.q_scale.items():
+    #             Q[idx + 1, idx + 1] = self.q * scale
+
+    #         return Q
+
+    #     # --------------------------------------------------
+
+    #     def _kalman_step(self, x_t, y_t):
+    #         x_aug = np.concatenate(([1.0], x_t)).reshape(-1, 1)
+
+    #         # ---------- PREDICT ----------
+    #         beta_pred = self.beta_.copy()
+
+    #         # Mean reversion ONLY for slopes
+    #         beta_pred[1:] += -self.anchor_strength * (
+    #             beta_pred[1:] - self.base_beta_[1:]
+    #         )
+
+    #         P_pred = self.P_ + self.Q_
+
+    #         y_hat = float(beta_pred @ x_aug)
+
+    #         # ---------- UPDATE ----------
+    #         residual = y_t - y_hat
+    #         S = float(x_aug.T @ P_pred @ x_aug + self.R_)
+    #         S = max(S, 1e-12)
+
+    #         K = (P_pred @ x_aug) / S
+    #         beta_upd = beta_pred + K.flatten() * residual
+
+    #         temp = self.I_ - K @ x_aug.T
+    #         P_upd = temp @ P_pred @ temp.T + K @ K.T * self.R_
+
+    #         # ---------- SIGN CONSTRAINTS ----------
+    #         if self.non_negative_idx or self.non_positive_idx:
+    #             self._project_state(beta_upd, P_upd)
+
+    #         # ---------- DEVIATION CONTROL ----------
+    #         if self.max_dev:
+    #             self._limit_beta_deviation(beta_upd)
+
+    #         self.beta_ = beta_upd
+    #         self.P_ = P_upd
+    #         return y_hat
+
+    #     # --------------------------------------------------
+
+    #     def _limit_beta_deviation(self, beta_vec):
+    #         """
+    #         Hard limit beta deviation from base beta
+    #         (intercept excluded)
+    #         """
+    #         for idx, max_delta in self.max_dev.items():
+    #             k = idx + 1  # shift for intercept
+
+    #             base = self.base_beta_[k]
+    #             lower = base - max_delta
+    #             upper = base + max_delta
+
+    #             if beta_vec[k] < lower:
+    #                 beta_vec[k] = lower
+    #             elif beta_vec[k] > upper:
+    #                 beta_vec[k] = upper
+
+    #     # --------------------------------------------------
+
+    #     def _project_state(self, beta_vec, cov_mat):
+    #         active = []
+    #         seen = set()
+
+    #         for idx in self.non_negative_idx:
+    #             k = idx + 1
+    #             if beta_vec[k] < 0 and k not in seen:
+    #                 active.append(k)
+    #                 seen.add(k)
+
+    #         for idx in self.non_positive_idx:
+    #             k = idx + 1
+    #             if beta_vec[k] > 0 and k not in seen:
+    #                 active.append(k)
+    #                 seen.add(k)
+
+    #         if not active:
+    #             return
+
+    #         active = np.array(active, dtype=int)
+    #         P_cc = cov_mat[np.ix_(active, active)]
+
+    #         jitter = 1e-9
+    #         for _ in range(6):
+    #             try:
+    #                 reg = P_cc + jitter * np.eye(len(active))
+    #                 solve_beta = np.linalg.solve(reg, beta_vec[active])
+    #                 solve_cov = np.linalg.solve(reg, cov_mat[active, :])
+    #                 break
+    #             except np.linalg.LinAlgError:
+    #                 jitter *= 10
+    #         else:
+    #             reg = P_cc + jitter * np.eye(len(active))
+    #             solve_beta = np.linalg.pinv(reg) @ beta_vec[active]
+    #             solve_cov = np.linalg.pinv(reg) @ cov_mat[active, :]
+
+    #         beta_vec -= cov_mat[:, active] @ solve_beta
+    #         beta_vec[active] = 0.0
+
+    #         cov_mat -= cov_mat[:, active] @ solve_cov
+    #         cov_mat[:] = 0.5 * (cov_mat + cov_mat.T)
+
+    
     class TimeVaryingKalmanRegression:
         """
         Time-Varying Kalman Regression with:
@@ -30,6 +213,7 @@ if menu == "Kalman Regression":
         - Adaptive intercept (beta0)
         - Covariance-aware sign constraints
         - Per-variable max deviation from base beta
+        - Ridge regularization for multicollinearity
         """
 
         def __init__(
@@ -41,28 +225,26 @@ if menu == "Kalman Regression":
             anchor_strength=0.05,
             non_negative_idx=None,
             non_positive_idx=None,
-            max_dev=None              # ⬅️ NEW
+            max_dev=None,
+            ridge_lambda=0.0          # ⬅️ NEW
         ):
             self.q = q
             self.r = r
             self.init_cov = init_cov
             self.q_scale = q_scale or {}
             self.anchor_strength = anchor_strength
+            self.ridge_lambda = ridge_lambda  # ⬅️ NEW
 
             self.non_negative_idx = non_negative_idx or []
             self.non_positive_idx = non_positive_idx or []
-
-            # max allowed deviation from base beta (standardized scale)
-            # {x_idx: delta}
             self.max_dev = max_dev or {}
 
         # --------------------------------------------------
 
         def fit(self, X, y, base_beta=None, beta0_init=0.0):
             T, p = X.shape
-            n_state = p + 1  # intercept + betas
+            n_state = p + 1
 
-            # ----- Initial state -----
             self.beta_ = np.zeros(n_state)
             self.beta_[0] = beta0_init
             if base_beta is not None:
@@ -70,7 +252,6 @@ if menu == "Kalman Regression":
 
             self.base_beta_ = self.beta_.copy()
 
-            # ----- Covariances -----
             self.P_ = np.eye(n_state) * self.init_cov
             self.Q_ = self._build_Q(n_state)
             self.R_ = self.r
@@ -93,7 +274,6 @@ if menu == "Kalman Regression":
         def _build_Q(self, n_state):
             Q = np.eye(n_state) * self.q
 
-            # Intercept: smoother but not frozen
             Q[0, 0] = self.q * 0.2
 
             for idx, scale in self.q_scale.items():
@@ -109,7 +289,6 @@ if menu == "Kalman Regression":
             # ---------- PREDICT ----------
             beta_pred = self.beta_.copy()
 
-            # Mean reversion ONLY for slopes
             beta_pred[1:] += -self.anchor_strength * (
                 beta_pred[1:] - self.base_beta_[1:]
             )
@@ -120,7 +299,14 @@ if menu == "Kalman Regression":
 
             # ---------- UPDATE ----------
             residual = y_t - y_hat
-            S = float(x_aug.T @ P_pred @ x_aug + self.R_)
+
+            # ⬇️ Ridge added here
+            S = float(
+                x_aug.T @ P_pred @ x_aug
+                + self.R_
+                + self.ridge_lambda
+            )
+
             S = max(S, 1e-12)
 
             K = (P_pred @ x_aug) / S
@@ -129,28 +315,22 @@ if menu == "Kalman Regression":
             temp = self.I_ - K @ x_aug.T
             P_upd = temp @ P_pred @ temp.T + K @ K.T * self.R_
 
-            # ---------- SIGN CONSTRAINTS ----------
             if self.non_negative_idx or self.non_positive_idx:
                 self._project_state(beta_upd, P_upd)
 
-            # ---------- DEVIATION CONTROL ----------
             if self.max_dev:
                 self._limit_beta_deviation(beta_upd)
 
             self.beta_ = beta_upd
             self.P_ = P_upd
+
             return y_hat
 
         # --------------------------------------------------
 
         def _limit_beta_deviation(self, beta_vec):
-            """
-            Hard limit beta deviation from base beta
-            (intercept excluded)
-            """
             for idx, max_delta in self.max_dev.items():
-                k = idx + 1  # shift for intercept
-
+                k = idx + 1
                 base = self.base_beta_[k]
                 lower = base - max_delta
                 upper = base + max_delta
@@ -203,6 +383,7 @@ if menu == "Kalman Regression":
 
             cov_mat -= cov_mat[:, active] @ solve_cov
             cov_mat[:] = 0.5 * (cov_mat + cov_mat.T)
+
 
 
     # =====================================================
@@ -312,31 +493,45 @@ if menu == "Kalman Regression":
         key="model"
     )
 
-
-    def load_file(uploaded_file, file_label):
-        if uploaded_file.name.endswith(".csv"):
-            return pd.read_csv(uploaded_file)
-
-        else:
-            # Read Excel file object
-            excel_file = pd.ExcelFile(uploaded_file)
-
-            # Sheet selector
-            sheet_name = st.sidebar.selectbox(
-                f"Select sheet for {file_label}",
-                excel_file.sheet_names,
-                key=f"{file_label}_sheet"
-            )
-
-            return pd.read_excel(excel_file, sheet_name=sheet_name)
-
-
     if not dataset_file or not model_file:
         st.info("Upload both dataset and model summary files to proceed.")
         st.stop()
 
-    dataset_df = load_file(dataset_file, "Dataset")
-    model_df = load_file(model_file, "Model")
+
+    # -----------------------------------------------------
+    # SHEET SELECTION (COMMON)
+    # -----------------------------------------------------
+
+    common_sheet = None
+
+    if dataset_file.name.endswith(("xlsx", "xls")) and model_file.name.endswith(("xlsx", "xls")):
+
+        dataset_excel = pd.ExcelFile(dataset_file)
+        model_excel = pd.ExcelFile(model_file)
+
+        # Find common sheets
+        common_sheets = list(
+            set(dataset_excel.sheet_names).intersection(model_excel.sheet_names)
+        )
+
+        if not common_sheets:
+            st.error("No common sheet names found between the two Excel files.")
+            st.stop()
+
+        common_sheet = st.sidebar.selectbox(
+            "Select Sheet (applies to both files)",
+            common_sheets,
+            key="shared_sheet"
+        )
+
+        dataset_df = pd.read_excel(dataset_excel, sheet_name=common_sheet)
+        model_df = pd.read_excel(model_excel, sheet_name=common_sheet)
+
+    else:
+        # If any file is CSV
+        dataset_df = pd.read_csv(dataset_file) if dataset_file.name.endswith(".csv") else pd.read_excel(dataset_file)
+        model_df = pd.read_csv(model_file) if model_file.name.endswith(".csv") else pd.read_excel(model_file)
+
 
 
     # st.dataframe(dataset_df)
@@ -376,8 +571,28 @@ if menu == "Kalman Regression":
     # -----------------------------------------------------
     st.sidebar.header("🔒 Sign Constraints")
 
-    positive_vars = st.sidebar.multiselect("Positive vars", x_vars)
-    negative_vars = st.sidebar.multiselect("Negative vars", x_vars)
+    # Create mapping of variable → beta
+    beta_dict = dict(zip(x_vars, base_beta))
+
+    # Auto-detect signs
+    auto_positive = [v for v, b in beta_dict.items() if b > 0]
+    auto_negative = [v for v, b in beta_dict.items() if b < 0]
+
+    # Multiselect with auto-default
+    positive_vars = st.sidebar.multiselect(
+        "Positive vars",
+        x_vars,
+        default=auto_positive,
+        key="positive_vars"
+    )
+
+    negative_vars = st.sidebar.multiselect(
+        "Negative vars",
+        x_vars,
+        default=auto_negative,
+        key="negative_vars"
+    )
+
 
     non_neg_idx, non_pos_idx = build_constraint_indices(
         x_vars, positive_vars, negative_vars
@@ -388,10 +603,43 @@ if menu == "Kalman Regression":
     # -----------------------------------------------------
     st.sidebar.header("⚙️ Kalman Params")
 
-    q = st.sidebar.number_input("Process noise q", 1e-5, 1e-1, 1e-3, format="%.5f")
-    r = st.sidebar.number_input("Observation noise r", 1.0, 100.0, 20.0)
-    init_cov = st.sidebar.number_input("Initial covariance", 0.001, 10.0, 0.01)
-    anchor = st.sidebar.number_input("Anchor strength", 0.0, 1.0, 0.001)
+    q = st.sidebar.number_input(
+        "Process noise q",
+        min_value=1e-5,
+        max_value=1e-1,
+        value=1e-3,
+        format="%.5f"
+    )
+
+    r = st.sidebar.number_input(
+        "Observation noise r",
+        min_value=1.0,
+        max_value=100.0,
+        value=20.0
+    )
+
+    init_cov = st.sidebar.number_input(
+        "Initial covariance",
+        min_value=0.001,
+        max_value=10.0,
+        value=0.01
+    )
+
+    anchor = st.sidebar.number_input(
+        "Anchor strength",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.001
+    )
+
+    # 🔥 NEW: Ridge Regularization
+    ridge_lambda = st.sidebar.number_input(
+        "Ridge regularization (λ)",
+        min_value=0.0,
+        max_value=50.0,
+        value=5.0,
+        step=0.5
+    )
 
     # -----------------------------------------------------
     # MAX DEVIATION
@@ -402,7 +650,10 @@ if menu == "Kalman Regression":
     for v in x_vars:
         if st.sidebar.checkbox(f"Limit {v}"):
             max_dev[x_vars.index(v)] = st.sidebar.slider(
-                f"Max deviation for {v}", 0.0, 1.0, 0.3
+                f"Max deviation for {v}",
+                min_value=0.0,
+                max_value=1.0,
+                value=0.3
             )
 
     # -----------------------------------------------------
@@ -421,12 +672,11 @@ if menu == "Kalman Regression":
     if st.session_state.kalman_ran is None:
         st.session_state.kalman_ran = False
 
-
-
     # -----------------------------------------------------
     # RUN MODEL
     # -----------------------------------------------------
     if st.button("🚀 Run Kalman"):
+
         X, y, _ = prepare_data(dataset_df, y_col, x_vars, std_method)
 
         kf = TimeVaryingKalmanRegression(
@@ -436,7 +686,8 @@ if menu == "Kalman Regression":
             anchor_strength=anchor,
             non_negative_idx=non_neg_idx,
             non_positive_idx=non_pos_idx,
-            max_dev=max_dev
+            max_dev=max_dev,
+            ridge_lambda=ridge_lambda      # 🔥 PASS RIDGE
         )
 
         with st.spinner("Running Kalman filter..."):
@@ -720,7 +971,7 @@ if menu == "Kalman Regression":
     base_model_end = st.sidebar.selectbox(
         "Base model end date",
         options=dates_all.unique(),
-        index=len(dates_all.unique()) - 13  # defaults to ~12 months before end
+        index=len(dates_all.unique()) - 25  # defaults to ~12 months before end
     )
     # -----------------------------------------------------
     # AUTOMATIC FORECAST HORIZON
@@ -915,12 +1166,12 @@ if menu == "Kalman Regression":
 
         stats_rows.append({
             "Variable": var,
-            # "Base Scaled Beta": base_scaled_beta,
-            # # "base sum": base_sum_x,
-            # "Base Std" : base_std,
-            # 'Base mean': base_mean_x,
-            # 'Base y mean': base_mean_y,
-            # "Base Unscaled Beta": base_unscaled_beta,
+            "Base Scaled Beta": base_scaled_beta,
+            # "base sum": base_sum_x,
+            "Base Std" : base_std,
+            'Base mean': base_mean_x,
+            'Base y mean': base_mean_y,
+            "Base Unscaled Beta": base_unscaled_beta,
             "Base Elasticity": base_elasticity,
             # "Kalman Scaled Beta": kalman_scaled_beta,
             # "Kalman Unscaled Beta": kalman_unscaled_beta,
@@ -1086,21 +1337,108 @@ elif menu == "Post-Modeling Analysis":
     ]
 
     with st.expander("Elasticity Data"):
-        st.dataframe(elasticity_df)
+        # st.dataframe(elasticity_df[["Segment","Variable","Elasticity"]])
+        display_df = elasticity_df[["Segment", "Variable", "Elasticity"]].copy()
+        display_df["Elasticity"] = display_df["Elasticity"].round(2)
 
+        st.dataframe(display_df, use_container_width=True)
+
+    # with st.expander("Growth Rate Data"):
+    #     # Rename Feature column if exists
+    #     if "Feature" in growth_df.columns:
+    #         growth_df.rename(columns={"Feature": "Variable"}, inplace=True)
+    #     segments = elasticity_df["Segment"].unique()
+
+    #     # Create cross-join style duplication for each segment
+    #     growth_df = growth_df.assign(key=1)
+    #     segment_df = pd.DataFrame({"Segment": segments, "key": 1})
+
+    #     growth_df = growth_df.merge(segment_df, on="key").drop("key", axis=1)
+
+    #     # Function to clean variable names
+    #     def clean_var_name(var):
+    #         return (
+    #             var.replace("Res_", "")
+    #             .replace("Lag_", "")
+    #             .replace("lag_", "")
+    #             .strip()
+    #         )
+
+    #     # Create cleaned versions
+    #     elasticity_df["CleanVar"] = elasticity_df["Variable"].apply(clean_var_name)
+    #     growth_df["CleanVar"] = growth_df["Variable"].apply(clean_var_name)
+
+    #     # Create mapping from CleanVar → original elasticity variable
+    #     clean_to_original = dict(
+    #         zip(elasticity_df["CleanVar"], elasticity_df["Variable"])
+    #     )
+
+    #     # Keep only growth variables that match elasticity
+    #     growth_df = growth_df[
+    #         growth_df["CleanVar"].isin(clean_to_original.keys())
+    #     ].copy()
+
+    #     growth_df["Variable"] = growth_df["CleanVar"].map(clean_to_original)
+
+    #     growth_df.drop(columns=["CleanVar"], inplace=True)
+    #     elasticity_df.drop(columns=["CleanVar"], inplace=True)
+
+
+
+    #     # st.dataframe(elasticity_df)
+
+    #     edited_growth_df = st.data_editor(growth_df)
     with st.expander("Growth Rate Data"):
+
         # Rename Feature column if exists
         if "Feature" in growth_df.columns:
             growth_df.rename(columns={"Feature": "Variable"}, inplace=True)
+
         segments = elasticity_df["Segment"].unique()
 
-        # Create cross-join style duplication for each segment
-        growth_df = growth_df.assign(key=1)
+        # ---------------------------------------------
+        # Split Seasonality / Trend vs Others
+        # ---------------------------------------------
+        special_vars = ["Seasonality", "Trend"]
+
+        special_growth = growth_df[
+            growth_df["Variable"].isin(special_vars)
+        ].copy()
+
+        other_growth = growth_df[
+            ~growth_df["Variable"].isin(special_vars)
+        ].copy()
+
+        # ---------------------------------------------
+        # Cross-join ONLY for other variables
+        # ---------------------------------------------
+        other_growth = other_growth.assign(key=1)
         segment_df = pd.DataFrame({"Segment": segments, "key": 1})
 
-        growth_df = growth_df.merge(segment_df, on="key").drop("key", axis=1)
+        other_growth = (
+            other_growth
+            .merge(segment_df, on="key")
+            .drop("key", axis=1)
+        )
 
-        # Function to clean variable names
+        # ---------------------------------------------
+        # For Seasonality & Trend → Keep Only Matching Segment
+        # ---------------------------------------------
+        special_growth = special_growth[
+            special_growth["Segment"].isin(segments)
+        ].copy()
+
+        # ---------------------------------------------
+        # Combine back
+        # ---------------------------------------------
+        growth_df = pd.concat(
+            [other_growth, special_growth],
+            ignore_index=True
+        )
+
+        # ---------------------------------------------
+        # Clean variable names
+        # ---------------------------------------------
         def clean_var_name(var):
             return (
                 var.replace("Res_", "")
@@ -1109,30 +1447,26 @@ elif menu == "Post-Modeling Analysis":
                 .strip()
             )
 
-        # Create cleaned versions
         elasticity_df["CleanVar"] = elasticity_df["Variable"].apply(clean_var_name)
         growth_df["CleanVar"] = growth_df["Variable"].apply(clean_var_name)
 
-        # Create mapping from CleanVar → original elasticity variable
         clean_to_original = dict(
             zip(elasticity_df["CleanVar"], elasticity_df["Variable"])
         )
 
-        # Keep only growth variables that match elasticity
         growth_df = growth_df[
             growth_df["CleanVar"].isin(clean_to_original.keys())
         ].copy()
 
         growth_df["Variable"] = growth_df["CleanVar"].map(clean_to_original)
+        valid_segments = elasticity_df["Segment"].unique()
+        growth_df['Segment'] = valid_segments[0]
 
-        growth_df.drop(columns=["CleanVar"], inplace=True)
+        growth_df.drop(columns=["CleanVar","Segment_x","Segment_y"], inplace=True)
         elasticity_df.drop(columns=["CleanVar"], inplace=True)
 
-
-
-        # st.dataframe(elasticity_df)
-
         edited_growth_df = st.data_editor(growth_df)
+
 
     # dataset_df["date"] = pd.to_datetime(dataset_df["date"])
 
@@ -1357,6 +1691,7 @@ elif menu == "Post-Modeling Analysis":
     )
 
     all_forecasts = []
+    all_x_contributions = []
 
     # track last year's volume per segment
     last_volume = base_vol_map.copy()
@@ -1402,8 +1737,13 @@ elif menu == "Post-Modeling Analysis":
                 "ScaledBeta0"
             ].iloc[0]
             # st.write(y_hat)
+            seg_betas = beta_df[beta_df["Segment"] == seg]
+
+            beta0 = seg_betas["ScaledBeta0"].iloc[0]
 
             seg_betas = beta_df[beta_df["Segment"] == seg]
+
+            var_contributions = {}
 
             for _, b in seg_betas.iterrows():
                 var = b["Variable"]
@@ -1416,8 +1756,15 @@ elif menu == "Post-Modeling Analysis":
 
                 x_scaled = (new_x[var] - mean_x) / std_x
                 x_contrib = b["ScaledBeta"] * x_scaled
+                beta = b['ScaledBeta']
+                var_contributions[var] = x_contrib
                 y_hat += b["ScaledBeta"] * x_scaled
+                # x_contrib = x_contrib/y_hat
+                # st.write(fy)
                 # st.write(var)
+                # st.write("new var", new_x[var])
+                # st.write("mean",mean_x)
+                # st.write("std",std_x)
                 # st.write(x_scaled)
                 # st.write(b["ScaledBeta"])
                 # st.write(x_contrib)
@@ -1436,10 +1783,80 @@ elif menu == "Post-Modeling Analysis":
                 "VolumeGrowth_%": yoy_growth
             })
 
-            # ---- STEP 3: carry forward X values ----
+            # ---------------------------------------------------
+            # STEP 4: Store Contribution Data
+            # ---------------------------------------------------
+            total_prediction = y_hat if y_hat != 0 else 1
+
+            # # Intercept contribution
+            # all_x_contributions.append({
+            #     "FiscalYear": f"FY{fy[1:]}",
+            #     "Segment": seg,
+            #     "Variable": "Intercept",
+            #     "Contribution_Value": beta0,
+            #     "Contribution_%": (beta0 / total_prediction) * 100,
+            #     "PredictedVolume": y_hat
+            # })
+
+            # Variable contributions
+            for var, contrib in var_contributions.items():
+
+                contribution_pct = (contrib / total_prediction)
+
+                all_x_contributions.append({
+                    "FiscalYear": f"FY{fy[1:]}",
+                    "Segment": seg,
+                    "Variable": var,
+                    # "beta": beta,
+                    # 'Scaled_var': x_scaled,
+                    "Contribution_Value": contrib,
+                    "Contribution_%": contribution_pct,
+                    "PredictedVolume": y_hat
+                })
+
+            # ---------------------------------------------------
+            # STEP 5: Carry Forward Values
+            # ---------------------------------------------------
             last_x_values[seg] = new_x
+            last_volume[seg] = y_hat
+
+            # # ---- STEP 3: carry forward X values ----
+            # last_x_values[seg] = new_x
 
     forecast_df = pd.DataFrame(all_forecasts)
+    x_contribution_df = pd.DataFrame(all_x_contributions)
+    # st.write(x_contribution_df)
+    #-----------------------------------------
+    # Create Year Label (A26 format)
+    # -----------------------------------------
+    x_contribution_df["YearLabel"] = (
+        "A" + x_contribution_df["FiscalYear"].str.replace("FY", "", regex=False)
+    )
+
+    # -----------------------------------------
+    # Pivot to Wide Format
+    # -----------------------------------------
+    wide_contribution_df = (
+        x_contribution_df
+        .pivot_table(
+            index=["Segment", "Variable"],
+            columns="YearLabel",
+            values="Contribution_%",
+            aggfunc="sum"
+        )
+        .reset_index()
+    )
+
+    # -----------------------------------------
+    # Rename columns properly
+    # -----------------------------------------
+    wide_contribution_df.columns = [
+        f"{col} Contribution" if col.startswith("A") else col
+        for col in wide_contribution_df.columns
+    ]
+
+    # st.write("Contribution of X variables:")
+    # st.dataframe(wide_contribution_df)
 
     
     # st.dataframe(
@@ -1447,15 +1864,30 @@ elif menu == "Post-Modeling Analysis":
     #     use_container_width=True
     # )
 
+    dataset_df_filter["Fiscal Year"] = (
+        dataset_df_filter["Fiscal Year"]
+        .str.replace("FY", "A", regex=False)
+    )
+    recent_fy = recent_fy.replace("FY", "A")
+    # st.write(recent_fy)
+
     base_vol_df = (
-        dataset_df_filter[dataset_df_filter["Fiscal Year"] == recent_fy]
+        dataset_df_filter[dataset_df_filter["Fiscal Year"] == recent_fy.replace("FY", "A")]
         .groupby("Segment")["Volume"]
         .mean()
         .reset_index()
         .rename(columns={"Volume": "PredictedVolume"})
     )
+    # st.write(recent_fy)
+    # st.dataframe(base_vol_df)
+    forecast_df["FiscalYear"] = (
+        forecast_df["FiscalYear"]
+        .str.replace("FY", "A", regex=False)
+    )
 
-    base_vol_df["FiscalYear"] = recent_fy
+
+    base_vol_df["FiscalYear"] = recent_fy.replace("FY", "A")
+
 
     tmp = pd.concat(
         [
@@ -1478,63 +1910,136 @@ elif menu == "Post-Modeling Analysis":
 
     final_df = tmp[tmp["FiscalYear"] != recent_fy].drop(columns="FY_num")
 
+    final_df["FY_num"] = final_df["FiscalYear"].str.extract(r"(\d+)").astype(int)
 
+    forecast_years = sorted(
+        final_df["FiscalYear"].unique(),
+        key=lambda x: int(x[1:])
+    )
+
+    first_year = forecast_years[0]
+
+    editable_mask = final_df["FiscalYear"] == first_year
+
+    st.write("##### A26 Model Forecast")
+
+    display_df = final_df.loc[
+        editable_mask, 
+        ["Segment", "FiscalYear", "VolumeGrowth_%"]
+    ].copy()
+
+    display_df["VolumeGrowth_%"] = display_df["VolumeGrowth_%"].round(1)
+
+    st.dataframe(display_df, use_container_width=True)
+    
+    st.write("##### A26 Growth rate edit:")
+    editable_display_df = (
+        final_df.loc[editable_mask, ["Segment", "FiscalYear", "VolumeGrowth_%"]]
+        .copy()
+    )
+
+    editable_display_df["VolumeGrowth_%"] = editable_display_df["VolumeGrowth_%"].round(1)
+
+    edited_input = st.data_editor(
+        editable_display_df,
+        key="editable_fy26_growth"
+    )
+
+    for _, row in edited_input.iterrows():
+
+        seg = row["Segment"]
+        edited_growth = row["VolumeGrowth_%"] / 100
+
+        # Base (recent actual)
+        base_volume = base_vol_df.loc[
+            base_vol_df["Segment"] == seg,
+            "PredictedVolume"
+        ].values[0]
+
+        # -------------------------
+        # 1️⃣ Recalculate FY26 Volume
+        # -------------------------
+        new_fy26_volume = base_volume * (1 + edited_growth)
+
+        final_df.loc[
+            (final_df["Segment"] == seg) &
+            (final_df["FiscalYear"] == first_year),
+            "PredictedVolume"
+        ] = new_fy26_volume
+
+        final_df.loc[
+            (final_df["Segment"] == seg) &
+            (final_df["FiscalYear"] == first_year),
+            "VolumeGrowth_%"
+        ] = edited_growth * 100
+
+        # -------------------------
+        # 2️⃣ Recalculate Growth for Remaining Years
+        # -------------------------
+        for i in range(1, len(forecast_years)):
+
+            prev_year = forecast_years[i - 1]
+            curr_year = forecast_years[i]
+
+            prev_vol = final_df.loc[
+                (final_df["Segment"] == seg) &
+                (final_df["FiscalYear"] == prev_year),
+                "PredictedVolume"
+            ].values[0]
+
+            curr_vol = final_df.loc[
+                (final_df["Segment"] == seg) &
+                (final_df["FiscalYear"] == curr_year),
+                "PredictedVolume"
+            ].values[0]
+
+            new_growth = ((curr_vol - prev_vol) / prev_vol) * 100
+
+            final_df.loc[
+                (final_df["Segment"] == seg) &
+                (final_df["FiscalYear"] == curr_year),
+                "VolumeGrowth_%"
+            ] = new_growth
+
+    final_df.drop(columns="FY_num", inplace=True)
+
+    display_df = final_df.sort_values(["Segment", "FiscalYear"]).copy()
+
+    num_cols = display_df.select_dtypes(include="number").columns
+    display_df[num_cols] = display_df[num_cols].round(1)
 
     st.subheader("📈 Forecasted Volumes & Growth Rates")
-    st.dataframe(
-        final_df.sort_values(["Segment", "FiscalYear"]),
-        use_container_width=True
-    )
+    st.dataframe(display_df, use_container_width=True)
+
 
     final_growth_df = final_df.copy()
 
-    final_growth_df["FY_short"] = final_growth_df["FiscalYear"].str.replace("FY", "A")
+    # final_growth_df["FY_short"] = final_growth_df["FiscalYear"].str.replace("FY", "A")
+    final_growth_df["YearLabel"] = final_growth_df["FiscalYear"]
     final_growth_df["growth_dec"] = final_growth_df["VolumeGrowth_%"] / 100
 
     pivot_growth = (
         final_growth_df
-        .pivot(index="Segment", columns="FY_short", values="growth_dec")
+        .pivot(index="Segment", columns="YearLabel", values="growth_dec")
         .reset_index()
     )
 
-    # pivot_growth["3-yr CAGR"] = (
-    #     (1 + pivot_growth["A26"]) *
-    #     (1 + pivot_growth["A27"]) *
-    #     (1 + pivot_growth["A28"])
-    # ) ** (1 / 3) - 1
+    # st.subheader("📊 CAGR Settings")
+    with st.expander("📊 CAGR Settings"):
 
-    # for col in ["A26", "A27", "A28", "3-yr CAGR"]:
-    #     pivot_growth[col] = (pivot_growth[col] * 100).round(1)
+        year_cols = sorted(
+            [c for c in pivot_growth.columns if c.startswith("A")],
+            key=lambda x: int(x[1:])
+        )
 
-    # final_cagr_table = pivot_growth.set_index("Segment")
+        max_years = len(year_cols)
 
-
-    # st.dataframe(
-    #     final_cagr_table.style.format({
-    #         "A26": "{:.1f} %",
-    #         "A26": "{:.1f} %",
-    #         "A27": "{:.1f} %",
-    #         "A28": "{:.1f} %",
-    #         "3-yr CAGR": "{:.1f} %"
-    #     }),
-    #     use_container_width=True
-    # )
-
-    st.subheader("📊 CAGR Settings")
-
-    year_cols = sorted(
-        [c for c in pivot_growth.columns if c.startswith("A")],
-        key=lambda x: int(x[1:])
-    )
-
-    max_years = len(year_cols)
-
-    cagr_years = st.slider(
-        "Select number of years for CAGR",
-        min_value=2,
-        max_value=max_years,
-        value=min(3, max_years)
-    )
+        cagr_years = st.slider(
+            "Select number of years for CAGR",
+            min_value=2,
+            max_value=max_years,
+            value=min(3, max_years)
+        )
 
     selected_years = year_cols[-cagr_years:]
 
@@ -1569,31 +2074,52 @@ elif menu == "Post-Modeling Analysis":
 
 ##################### Waterfall Charts #########################
 
-    st.subheader("🎯 Waterfall Configuration")
+    st.subheader("🎯 Waterfall Chart")
+    with st.expander("🎯 Waterfall Configuration"):
 
-    fy_list = sorted(
-        final_df["FiscalYear"].unique(),
-        key=lambda x: int(x.replace("FY", ""))
-    )
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        start_fy = st.selectbox(
-            "Select Start Fiscal Year",
-            fy_list,
-            index=0
+        fy_list = sorted(
+            final_df["FiscalYear"].unique(),
+            key=lambda x: int(x.replace("A", ""))
         )
 
-    with col2:
-        end_fy = st.selectbox(
-            "Select End Fiscal Year",
-            fy_list,
-            index=len(fy_list) - 1
-        )
+        col1, col2 = st.columns(2)
 
-    start_year = int(start_fy.replace("FY", ""))
-    end_year = int(end_fy.replace("FY", ""))
+        with col1:
+            start_fy = st.selectbox(
+                "Select Start Fiscal Year",
+                fy_list,
+                index=0
+            )
+
+            # st.write("##### 🧩 Variable Selection")
+
+            exclude_vars = ["Seasonality", "Trend"]
+
+            all_vars = sorted(
+                v for v in elasticity_df["Variable"].unique().tolist()
+                if v not in exclude_vars
+            )
+
+            selected_vars = st.multiselect(
+                "Select variables to include in waterfall",
+                options=all_vars,
+                default=all_vars  # keep all selected by default
+            )
+
+        with col2:
+            end_fy = st.selectbox(
+                "Select End Fiscal Year",
+                fy_list,
+                index=len(fy_list) - 1
+            )
+
+            VARIABLE_SCALE = st.slider(
+                "Emphasize variable contribution",
+                1.0, 3.0, 2.0, 0.1
+            )
+
+    start_year = int(start_fy.replace("A", ""))
+    end_year = int(end_fy.replace("A", ""))
 
     if end_year <= start_year:
         st.error("End Fiscal Year must be greater than Start Fiscal Year")
@@ -1604,17 +2130,17 @@ elif menu == "Post-Modeling Analysis":
         for y in range(start_year + 1, end_year + 1)
     ]
 
-    st.subheader("🧩 Variable Selection")
+    # st.subheader("🧩 Variable Selection")
 
-    all_vars = sorted(
-        elasticity_df["Variable"].unique().tolist()
-    )
+    # all_vars = sorted(
+    #     elasticity_df["Variable"].unique().tolist()
+    # )
 
-    selected_vars = st.multiselect(
-        "Select variables to include in waterfall",
-        options=all_vars,
-        default=all_vars  # keep all selected by default
-    )
+    # selected_vars = st.multiselect(
+    #     "Select variables to include in waterfall",
+    #     options=all_vars,
+    #     default=all_vars  # keep all selected by default
+    # )
 
     if not selected_vars:
         st.warning("Please select at least one variable")
@@ -1689,10 +2215,10 @@ elif menu == "Post-Modeling Analysis":
 
     segments = sorted(final_df["Segment"].unique())
 
-    selected_segment = st.selectbox(
-        "Select Segment",
-        segments
-    )
+    # selected_segment = st.selectbox(
+    #     "Select Segment",
+    #     segments
+    # )
 
 
     # --- Start FY ---
@@ -1747,10 +2273,10 @@ elif menu == "Post-Modeling Analysis":
     # st.dataframe(wf_df)
 
 
-    VARIABLE_SCALE = st.slider(
-        "Emphasize variable contribution",
-        1.0, 3.0, 2.0, 0.1
-    )
+    # VARIABLE_SCALE = st.slider(
+    #     "Emphasize variable contribution",
+    #     1.0, 3.0, 2.0, 0.1
+    # )
 
     START_END_SCALE = 0.25   # shrink anchors
     # VARIABLE_SCALE = 2.0    # amplify contributions
