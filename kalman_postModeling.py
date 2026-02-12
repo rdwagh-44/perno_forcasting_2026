@@ -1870,6 +1870,87 @@ elif menu == "Post-Modeling Analysis":
     )
     recent_fy = recent_fy.replace("FY", "A")
     # st.write(recent_fy)
+    # st.dataframe(dataset_df_filter)
+    # Ensure date is datetime
+    # dataset_df_filter["date"] = pd.to_datetime(
+    #     dataset_df_filter["date"],
+    #     errors="coerce"
+    # )
+
+    # Ensure datetime
+    # dataset_df_filter["date"] = pd.to_datetime(
+    #     dataset_df_filter["date"],
+    #     errors="coerce"
+    # )
+
+    # -----------------------------
+    # H1 A25 = Jul–Dec 2024
+    # -----------------------------
+    h1_a25 = (
+        dataset_df_filter[
+            (dataset_df_filter["date"].dt.year == 2024) &
+            (dataset_df_filter["date"].dt.month >= 7)
+        ]
+        .groupby("Segment")["Volume"]
+        .sum()
+        .reset_index()
+        .rename(columns={"Volume": "H1_A25_JulDec_2024"})
+    )
+
+    # -----------------------------
+    # H1 A26 = Jul–Dec 2025
+    # -----------------------------
+    h1_a26 = (
+        dataset_df_filter[
+            (dataset_df_filter["date"].dt.year == 2025) &
+            (dataset_df_filter["date"].dt.month >= 7)
+        ]
+        .groupby("Segment")["Volume"]
+        .sum()
+        .reset_index()
+        .rename(columns={"Volume": "H1_A26_JulDec_2025"})
+    )
+
+    # -----------------------------
+    # Merge
+    # -----------------------------
+    h1_growth = h1_a25.merge(h1_a26, on="Segment", how="inner")
+
+    # -----------------------------
+    # Growth Calculation
+    # -----------------------------
+    h1_growth["H1_A25_to_A26_Growth_%"] = (
+        (h1_growth["H1_A26_JulDec_2025"] - h1_growth["H1_A25_JulDec_2024"])
+        / h1_growth["H1_A25_JulDec_2024"]
+    ) * 100
+
+    h1_growth["H1_A25_to_A26_Growth_%"] = (
+        h1_growth["H1_A25_to_A26_Growth_%"].round(1)
+    )
+    h1_growth["H1_A26_JulDec_2025"] = (
+        h1_growth["H1_A26_JulDec_2025"].round(1)
+    )
+    h1_growth["H1_A25_JulDec_2024"] = (
+        h1_growth["H1_A25_JulDec_2024"].round(1)
+    )
+
+    # -----------------------------
+    # Display
+    # -----------------------------
+    st.subheader("📊 H1 A25 → H1 A26 Growth (Jul–Dec YoY)")
+
+    st.dataframe(
+        h1_growth[
+            [
+                "Segment",
+                "H1_A25_JulDec_2024",
+                "H1_A26_JulDec_2025",
+                "H1_A25_to_A26_Growth_%"
+            ]
+        ],
+        use_container_width=True
+    )
+
 
     base_vol_df = (
         dataset_df_filter[dataset_df_filter["Fiscal Year"] == recent_fy.replace("FY", "A")]
@@ -2198,12 +2279,12 @@ elif menu == "Post-Modeling Analysis":
     # st.dataframe(total_contrib)
 
     start_vol = (
-        forecast_df[forecast_df["FiscalYear"] == start_fy]
+        final_df[final_df["FiscalYear"] == start_fy]
         .set_index("Segment")["PredictedVolume"]
     )
 
     end_vol = (
-        forecast_df[forecast_df["FiscalYear"] == end_fy]
+        final_df[final_df["FiscalYear"] == end_fy]
         .set_index("Segment")["PredictedVolume"]
     )
 
