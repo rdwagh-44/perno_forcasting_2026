@@ -2231,7 +2231,7 @@ elif menu == "Post-Modeling Analysis":
 
     contrib_rows = []
 
-    for _, row in growth_df.iterrows():
+    for _, row in edited_growth_df.iterrows():
         seg = row["Segment"]
         var = row["Variable"]
 
@@ -2253,7 +2253,7 @@ elif menu == "Post-Modeling Analysis":
         for fy in selected_years:   # e.g. ["A26", "A27", "A28"]
             growth_col = f"{fy} Growth Rate (%)"
 
-            if growth_col not in growth_df.columns:
+            if growth_col not in edited_growth_df.columns:
                 continue
 
             g = row[growth_col]
