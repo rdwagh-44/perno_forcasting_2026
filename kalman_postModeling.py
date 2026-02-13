@@ -1841,7 +1841,7 @@ elif menu == "Post-Modeling Analysis":
         .pivot_table(
             index=["Segment", "Variable"],
             columns="YearLabel",
-            values="Contribution_%",
+            values="Contribution_Value",
             aggfunc="sum"
         )
         .reset_index()
@@ -1959,8 +1959,8 @@ elif menu == "Post-Modeling Analysis":
         .reset_index()
         .rename(columns={"Volume": "PredictedVolume"})
     )
-    # st.write(recent_fy)
-    # st.dataframe(base_vol_df)
+    st.write("#### A25 Volume")
+    st.dataframe(base_vol_df)
     forecast_df["FiscalYear"] = (
         forecast_df["FiscalYear"]
         .str.replace("FY", "A", regex=False)
